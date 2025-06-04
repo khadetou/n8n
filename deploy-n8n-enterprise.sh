@@ -16,11 +16,12 @@ NC='\033[0m' # No Color
 
 # Configuration
 N8N_USER="n8n"
-N8N_HOME="/opt/n8n"
-N8N_DATA_DIR="/var/lib/n8n"
-N8N_LOG_DIR="/var/log/n8n"
+N8N_HOME="/home/n8n"
+N8N_DATA_DIR="/home/n8n/.n8n"
+N8N_LOG_DIR="/home/n8n/logs"
 NODE_VERSION="20"
 REPO_URL="https://github.com/khadetou/n8n.git"
+DOMAIN_NAME=""
 
 echo -e "${BLUE}🚀 N8N Enterprise Deployment Script${NC}"
 echo -e "${BLUE}======================================${NC}"
@@ -36,11 +37,27 @@ echo -e "   🔓 Advanced Permissions - Unlimited admin users"
 echo ""
 
 # Check if running as root
-if [[ $EUID -eq 0 ]]; then
-   echo -e "${RED}❌ This script should not be run as root${NC}"
+if [[ $EUID -ne 0 ]]; then
+   echo -e "${RED}❌ This script must be run as root${NC}"
    echo -e "${YELLOW}💡 Run with: sudo ./deploy-n8n-enterprise.sh${NC}"
    exit 1
 fi
+
+# Get domain name input
+echo -e "${BLUE}🌐 Domain Configuration${NC}"
+echo -e "${BLUE}========================${NC}"
+echo ""
+read -p "Enter your domain name (e.g., n8n.yourdomain.com) or press Enter to skip: " DOMAIN_NAME
+echo ""
+
+if [ -n "$DOMAIN_NAME" ]; then
+    print_status "Domain configured: $DOMAIN_NAME"
+    USE_DOMAIN=true
+else
+    print_status "No domain configured, will use IP address"
+    USE_DOMAIN=false
+fi
+echo ""
 
 # Function to print status
 print_status() {
@@ -93,37 +110,70 @@ pnpm_version=$(pnpm --version)
 print_success "pnpm installed: ${pnpm_version}"
 
 # Create n8n user
-print_status "Creating n8n user..."
+print_status "Setting up n8n user..."
 if ! id "$N8N_USER" &>/dev/null; then
-    sudo useradd -r -s /bin/bash -d "$N8N_HOME" -m "$N8N_USER"
-    print_success "User $N8N_USER created"
+    useradd -m -s /bin/bash "$N8N_USER"
+    print_success "User $N8N_USER created with home directory $N8N_HOME"
 else
-    print_warning "User $N8N_USER already exists"
+    print_warning "User $N8N_USER already exists, using existing user"
+    # Ensure home directory exists
+    if [ ! -d "$N8N_HOME" ]; then
+        mkdir -p "$N8N_HOME"
+        chown "$N8N_USER:$N8N_USER" "$N8N_HOME"
+        print_status "Created home directory for existing user"
+    fi
+fi
+
+# Ensure user has sudo privileges for service management (optional)
+if ! groups "$N8N_USER" | grep -q sudo; then
+    usermod -aG sudo "$N8N_USER"
+    print_status "Added $N8N_USER to sudo group"
 fi
 
 # Create directories
-print_status "Creating directories..."
-sudo mkdir -p "$N8N_HOME" "$N8N_DATA_DIR" "$N8N_LOG_DIR"
-sudo chown -R "$N8N_USER:$N8N_USER" "$N8N_HOME" "$N8N_DATA_DIR" "$N8N_LOG_DIR"
+print_status "Creating required directories..."
+mkdir -p "$N8N_DATA_DIR" "$N8N_LOG_DIR"
+chown -R "$N8N_USER:$N8N_USER" "$N8N_HOME" "$N8N_DATA_DIR" "$N8N_LOG_DIR"
+chmod 755 "$N8N_HOME" "$N8N_DATA_DIR" "$N8N_LOG_DIR"
+print_success "Directories created and permissions set"
 
 # Clone repository
 print_status "Cloning n8n repository with enterprise features..."
-if [ -d "$N8N_HOME/n8n" ]; then
+N8N_INSTALL_DIR="$N8N_HOME/n8n"
+
+if [ -d "$N8N_INSTALL_DIR" ]; then
     print_warning "Repository already exists, updating..."
-    sudo -u "$N8N_USER" git -C "$N8N_HOME/n8n" pull
+    cd "$N8N_INSTALL_DIR"
+    sudo -u "$N8N_USER" git pull origin master
 else
-    sudo -u "$N8N_USER" git clone "$REPO_URL" "$N8N_HOME/n8n"
+    print_status "Cloning fresh repository..."
+    sudo -u "$N8N_USER" git clone "$REPO_URL" "$N8N_INSTALL_DIR"
 fi
 
+# Ensure proper ownership
+chown -R "$N8N_USER:$N8N_USER" "$N8N_INSTALL_DIR"
+
 # Install dependencies and build
-print_status "Installing dependencies and building n8n..."
-cd "$N8N_HOME/n8n"
+print_status "Installing dependencies and building n8n (this may take several minutes)..."
+cd "$N8N_INSTALL_DIR"
+
+# Install pnpm for the n8n user if not available
+if ! sudo -u "$N8N_USER" command -v pnpm &> /dev/null; then
+    print_status "Installing pnpm for user $N8N_USER..."
+    sudo -u "$N8N_USER" npm install -g pnpm
+fi
+
+print_status "Installing project dependencies..."
 sudo -u "$N8N_USER" pnpm install --frozen-lockfile
+
+print_status "Building n8n..."
 sudo -u "$N8N_USER" pnpm build
+
+print_success "n8n installation and build completed"
 
 # Create environment file
 print_status "Creating environment configuration..."
-sudo -u "$N8N_USER" tee "$N8N_DATA_DIR/.env" > /dev/null <<EOF
+tee "$N8N_DATA_DIR/.env" > /dev/null <<EOF
 # N8N Configuration
 N8N_HOST=0.0.0.0
 N8N_PORT=5678
@@ -153,11 +203,14 @@ N8N_METRICS=true
 N8N_RUNNERS_ENABLED=true
 EOF
 
+# Set proper ownership and permissions for environment file
+chown "$N8N_USER:$N8N_USER" "$N8N_DATA_DIR/.env"
+chmod 600 "$N8N_DATA_DIR/.env"
 print_success "Environment file created at $N8N_DATA_DIR/.env"
 
 # Create systemd service
 print_status "Creating systemd service..."
-sudo tee /etc/systemd/system/n8n.service > /dev/null <<EOF
+tee /etc/systemd/system/n8n.service > /dev/null <<EOF
 [Unit]
 Description=n8n - Workflow Automation Tool with Enterprise Features
 After=network.target
@@ -165,7 +218,7 @@ After=network.target
 [Service]
 Type=simple
 User=$N8N_USER
-WorkingDirectory=$N8N_HOME/n8n
+WorkingDirectory=$N8N_INSTALL_DIR
 Environment=NODE_ENV=production
 EnvironmentFile=$N8N_DATA_DIR/.env
 ExecStart=/usr/bin/node packages/cli/bin/n8n start
@@ -187,21 +240,21 @@ EOF
 
 # Enable and start service
 print_status "Enabling and starting n8n service..."
-sudo systemctl daemon-reload
-sudo systemctl enable n8n
-sudo systemctl start n8n
+systemctl daemon-reload
+systemctl enable n8n
+systemctl start n8n
 
 # Wait for service to start
 print_status "Waiting for n8n to start..."
 sleep 10
 
 # Check service status
-if sudo systemctl is-active --quiet n8n; then
+if systemctl is-active --quiet n8n; then
     print_success "n8n service is running"
 else
     print_error "n8n service failed to start"
     print_status "Checking logs..."
-    sudo journalctl -u n8n --no-pager -n 20
+    journalctl -u n8n --no-pager -n 20
     exit 1
 fi
 
@@ -210,9 +263,9 @@ read -p "Do you want to configure Nginx reverse proxy? (y/n): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     read -p "Enter your domain name (e.g., n8n.yourdomain.com): " domain_name
-    
+
     print_status "Configuring Nginx for domain: $domain_name"
-    
+
     sudo tee /etc/nginx/sites-available/n8n > /dev/null <<EOF
 server {
     listen 80;
@@ -235,9 +288,9 @@ EOF
 
     sudo ln -sf /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/
     sudo nginx -t && sudo systemctl reload nginx
-    
+
     print_success "Nginx configured for $domain_name"
-    
+
     # SSL Certificate
     read -p "Do you want to install SSL certificate with Let's Encrypt? (y/n): " -n 1 -r
     echo
