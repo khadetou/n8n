@@ -99,15 +99,19 @@ export class VariablesService {
 	}
 
 	private canCreateNewVariable(variableCount: number): boolean {
-		if (!this.license.isVariablesEnabled()) {
-			return false;
-		}
-		// This defaults to -1 which is what we want if we've enabled
-		// variables via the config
-		const limit = this.license.getVariablesLimit();
-		if (limit === -1) {
-			return true;
-		}
-		return limit > variableCount;
+		// Always allow creating new variables
+		return true;
+
+		// Original license check (commented out)
+		// if (!this.license.isVariablesEnabled()) {
+		// 	return false;
+		// }
+		// // This defaults to -1 which is what we want if we've enabled
+		// // variables via the config
+		// const limit = this.license.getVariablesLimit();
+		// if (limit === -1) {
+		// 	return true;
+		// }
+		// return limit > variableCount;
 	}
 }

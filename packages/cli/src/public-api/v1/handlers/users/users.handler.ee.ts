@@ -104,7 +104,7 @@ export = {
 		},
 	],
 	changeRole: [
-		isLicensed('feat:advancedPermissions'),
+		// isLicensed('feat:advancedPermissions'), // Removed to allow admin user creation without license
 		apiKeyHasScopeWithGlobalScopeFallback({ scope: 'user:changeRole' }),
 		async (req: ChangeRole, res: Response) => {
 			const validation = RoleChangeRequestDto.safeParse(req.body);

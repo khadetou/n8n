@@ -20,6 +20,7 @@
     "dev:ai": "turbo run dev --parallel --env-mode=loose --filter=@n8n/nodes-langchain --filter=n8n --filter=n8n-core",
     "dev:fe": "run-p start \"dev:fe:editor --filter=@n8n/design-system\"",
     "dev:fe:editor": "turbo run dev --parallel --env-mode=loose --filter=n8n-editor-ui",
+    "dev:concurrent": "run-p dev:be dev:fe:editor",
     "dev:e2e": "cd cypress && pnpm run test:e2e:dev",
     "debug:flaky:e2e": "cd cypress && pnpm run test:flaky",
     "dev:e2e:server": "run-p start dev:fe:editor",

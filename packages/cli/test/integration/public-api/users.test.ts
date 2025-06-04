@@ -181,7 +181,7 @@ describe('Users in Public API', () => {
 			expect(response.status).toBe(401);
 		});
 
-		it('if not licensed, should reject', async () => {
+		it('should allow role change even if not licensed', async () => {
 			/**
 			 * Arrange
 			 */
@@ -200,11 +200,9 @@ describe('Users in Public API', () => {
 			/**
 			 * Assert
 			 */
-			expect(response.status).toBe(403);
-			expect(response.body).toHaveProperty(
-				'message',
-				new FeatureNotLicensedError('feat:advancedPermissions').message,
-			);
+			expect(response.status).toBe(204);
+			const storedUser = await getUserById(member.id);
+			expect(storedUser.role).toBe(payload.newRoleName);
 		});
 
 		it('if missing scope, should reject', async () => {

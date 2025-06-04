@@ -272,7 +272,7 @@ export class UsersController {
 
 	@Patch('/:id/role')
 	@GlobalScope('user:changeRole')
-	@Licensed('feat:advancedPermissions')
+	// @Licensed('feat:advancedPermissions') // Removed to allow admin user creation without license
 	async changeGlobalRole(
 		req: AuthenticatedRequest,
 		_: Response,

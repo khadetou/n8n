@@ -72,11 +72,12 @@ export class InvitationController {
 		}
 
 		const attributes = invitations.map(({ email, role }) => {
-			if (role === 'global:admin' && !this.license.isAdvancedPermissionsLicensed()) {
-				throw new ForbiddenError(
-					'Cannot invite admin user without advanced permissions. Please upgrade to a license that includes this feature.',
-				);
-			}
+			// Allow admin user creation without license restriction
+			// if (role === 'global:admin' && !this.license.isAdvancedPermissionsLicensed()) {
+			// 	throw new ForbiddenError(
+			// 		'Cannot invite admin user without advanced permissions. Please upgrade to a license that includes this feature.',
+			// 	);
+			// }
 			return { email, role };
 		});
 

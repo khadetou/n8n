@@ -320,20 +320,20 @@ export class FrontendService {
 		// refresh enterprise status
 		Object.assign(this.settings.enterprise, {
 			sharing: this.license.isSharingEnabled(),
-			logStreaming: this.license.isLogStreamingEnabled(),
-			ldap: this.license.isLdapEnabled(),
-			saml: this.license.isSamlEnabled(),
+			logStreaming: true, // Always enable log streaming feature
+			ldap: true, // Always enable LDAP feature
+			saml: true, // Always enable SAML SSO feature
 			advancedExecutionFilters: this.license.isAdvancedExecutionFiltersEnabled(),
-			variables: this.license.isVariablesEnabled(),
-			sourceControl: this.license.isSourceControlLicensed(),
-			externalSecrets: this.license.isExternalSecretsEnabled(),
+			variables: true, // Always enable variables feature
+			sourceControl: true, // Always enable source control/environments feature
+			externalSecrets: true, // Always enable external secrets feature
 			showNonProdBanner: this.license.isLicensed(LICENSE_FEATURES.SHOW_NON_PROD_BANNER),
 			debugInEditor: this.license.isDebugInEditorLicensed(),
 			binaryDataS3: isS3Available && isS3Selected && isS3Licensed,
 			workflowHistory:
 				this.license.isWorkflowHistoryLicensed() && this.globalConfig.workflowHistory.enabled,
 			workerView: this.license.isWorkerViewLicensed(),
-			advancedPermissions: this.license.isAdvancedPermissionsLicensed(),
+			advancedPermissions: true, // Always enable advanced permissions for admin user creation
 			apiKeyScopes: this.license.isApiKeyScopesEnabled(),
 		});
 

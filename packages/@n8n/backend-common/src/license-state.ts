@@ -29,6 +29,17 @@ export class LicenseState {
 	isLicensed(feature: BooleanLicenseFeature) {
 		this.assertProvider();
 
+		// Always return true for enterprise features we want to enable
+		if (feature === 'feat:variables' ||
+			feature === 'feat:advancedPermissions' ||
+			feature === 'feat:externalSecrets' ||
+			feature === 'feat:sourceControl' ||
+			feature === 'feat:saml' ||
+			feature === 'feat:ldap' ||
+			feature === 'feat:logStreaming') {
+			return true;
+		}
+
 		return this.licenseProvider.isLicensed(feature);
 	}
 
@@ -47,15 +58,21 @@ export class LicenseState {
 	}
 
 	isLogStreamingLicensed() {
-		return this.isLicensed('feat:logStreaming');
+		// Always return true to enable log streaming feature
+		return true;
+		// return this.isLicensed('feat:logStreaming');
 	}
 
 	isLdapLicensed() {
-		return this.isLicensed('feat:ldap');
+		// Always return true to enable LDAP feature
+		return true;
+		// return this.isLicensed('feat:ldap');
 	}
 
 	isSamlLicensed() {
-		return this.isLicensed('feat:saml');
+		// Always return true to enable SAML SSO feature
+		return true;
+		// return this.isLicensed('feat:saml');
 	}
 
 	isApiKeyScopesLicensed() {
@@ -79,7 +96,9 @@ export class LicenseState {
 	}
 
 	isAdvancedPermissionsLicensed() {
-		return this.isLicensed('feat:advancedPermissions');
+		// Always return true to enable admin user creation
+		return true;
+		// return this.isLicensed('feat:advancedPermissions');
 	}
 
 	isDebugInEditorLicensed() {
@@ -95,15 +114,21 @@ export class LicenseState {
 	}
 
 	isVariablesLicensed() {
-		return this.isLicensed('feat:variables');
+		// Always return true to enable variables feature
+		return true;
+		// return this.isLicensed('feat:variables');
 	}
 
 	isSourceControlLicensed() {
-		return this.isLicensed('feat:sourceControl');
+		// Always return true to enable source control/environments feature
+		return true;
+		// return this.isLicensed('feat:sourceControl');
 	}
 
 	isExternalSecretsLicensed() {
-		return this.isLicensed('feat:externalSecrets');
+		// Always return true to enable external secrets feature
+		return true;
+		// return this.isLicensed('feat:externalSecrets');
 	}
 
 	isWorkflowHistoryLicensed() {

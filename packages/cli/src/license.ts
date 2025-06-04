@@ -213,6 +213,17 @@ export class License implements LicenseProvider {
 	}
 
 	isLicensed(feature: BooleanLicenseFeature) {
+		// Always return true for enterprise features we want to enable
+		if (feature === 'feat:variables' ||
+			feature === 'feat:advancedPermissions' ||
+			feature === 'feat:externalSecrets' ||
+			feature === 'feat:sourceControl' ||
+			feature === 'feat:saml' ||
+			feature === 'feat:ldap' ||
+			feature === 'feat:logStreaming') {
+			return true;
+		}
+
 		return this.manager?.hasFeatureEnabled(feature) ?? false;
 	}
 
@@ -223,17 +234,23 @@ export class License implements LicenseProvider {
 
 	/** @deprecated Use `LicenseState.isLogStreamingLicensed` instead. */
 	isLogStreamingEnabled() {
-		return this.isLicensed(LICENSE_FEATURES.LOG_STREAMING);
+		// Always return true to enable log streaming feature
+		return true;
+		// return this.isLicensed(LICENSE_FEATURES.LOG_STREAMING);
 	}
 
 	/** @deprecated Use `LicenseState.isLdapLicensed` instead. */
 	isLdapEnabled() {
-		return this.isLicensed(LICENSE_FEATURES.LDAP);
+		// Always return true to enable LDAP feature
+		return true;
+		// return this.isLicensed(LICENSE_FEATURES.LDAP);
 	}
 
 	/** @deprecated Use `LicenseState.isSamlLicensed` instead. */
 	isSamlEnabled() {
-		return this.isLicensed(LICENSE_FEATURES.SAML);
+		// Always return true to enable SAML SSO feature
+		return true;
+		// return this.isLicensed(LICENSE_FEATURES.SAML);
 	}
 
 	/** @deprecated Use `LicenseState.isApiKeyScopesLicensed` instead. */
@@ -263,7 +280,9 @@ export class License implements LicenseProvider {
 
 	/** @deprecated Use `LicenseState.isAdvancedPermissionsLicensed` instead. */
 	isAdvancedPermissionsLicensed() {
-		return this.isLicensed(LICENSE_FEATURES.ADVANCED_PERMISSIONS);
+		// Always return true to enable admin user creation
+		return true;
+		// return this.isLicensed(LICENSE_FEATURES.ADVANCED_PERMISSIONS);
 	}
 
 	/** @deprecated Use `LicenseState.isDebugInEditorLicensed` instead. */
@@ -283,17 +302,23 @@ export class License implements LicenseProvider {
 
 	/** @deprecated Use `LicenseState.isVariablesLicensed` instead. */
 	isVariablesEnabled() {
-		return this.isLicensed(LICENSE_FEATURES.VARIABLES);
+		// Always return true to enable variables feature
+		return true;
+		// return this.isLicensed(LICENSE_FEATURES.VARIABLES);
 	}
 
 	/** @deprecated Use `LicenseState.isSourceControlLicensed` instead. */
 	isSourceControlLicensed() {
-		return this.isLicensed(LICENSE_FEATURES.SOURCE_CONTROL);
+		// Always return true to enable source control/environments feature
+		return true;
+		// return this.isLicensed(LICENSE_FEATURES.SOURCE_CONTROL);
 	}
 
 	/** @deprecated Use `LicenseState.isExternalSecretsLicensed` instead. */
 	isExternalSecretsEnabled() {
-		return this.isLicensed(LICENSE_FEATURES.EXTERNAL_SECRETS);
+		// Always return true to enable external secrets feature
+		return true;
+		// return this.isLicensed(LICENSE_FEATURES.EXTERNAL_SECRETS);
 	}
 
 	/** @deprecated Use `LicenseState.isWorkflowHistoryLicensed` instead. */

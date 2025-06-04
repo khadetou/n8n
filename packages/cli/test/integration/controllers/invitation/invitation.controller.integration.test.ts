@@ -359,16 +359,24 @@ describe('InvitationController', () => {
 				.expect(200);
 		});
 
-		test('should return 403 on creating admin shell when advanced permissions is unlicensed', async () => {
+		test('should allow creating admin shell even when advanced permissions is unlicensed', async () => {
 			testServer.license.disable('feat:advancedPermissions');
 
 			mailer.invite.mockResolvedValue({ emailSent: false });
 
-			await testServer
+			const response: InvitationResponse = await testServer
 				.authAgentFor(instanceOwner)
 				.post('/invitations')
 				.send([{ email: randomEmail(), role: 'global:admin' }])
-				.expect(403);
+				.expect(200);
+
+			const [result] = response.body.data;
+
+			const storedUser = await userRepository.findOneByOrFail({
+				id: result.user.id,
+			});
+
+			assertStoredUserProps(storedUser);
 		});
 
 		test('should email invites and create user shells, without inviting existing users', async () => {
