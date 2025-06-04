@@ -259,17 +259,19 @@ else
 fi
 
 # Configure Nginx (optional)
-read -p "Do you want to configure Nginx reverse proxy? (y/n): " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    read -p "Enter your domain name (e.g., n8n.yourdomain.com): " domain_name
+if [ "$USE_DOMAIN" = true ]; then
+    print_status "Configuring Nginx reverse proxy for domain: $DOMAIN_NAME"
 
-    print_status "Configuring Nginx for domain: $domain_name"
+    # Install Nginx if not already installed
+    if ! command -v nginx &> /dev/null; then
+        print_status "Installing Nginx..."
+        apt install -y nginx
+    fi
 
-    sudo tee /etc/nginx/sites-available/n8n > /dev/null <<EOF
+    tee /etc/nginx/sites-available/n8n > /dev/null <<EOF
 server {
     listen 80;
-    server_name $domain_name;
+    server_name $DOMAIN_NAME;
 
     location / {
         proxy_pass http://localhost:5678;
@@ -286,25 +288,45 @@ server {
 }
 EOF
 
-    sudo ln -sf /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/
-    sudo nginx -t && sudo systemctl reload nginx
+    ln -sf /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/
 
-    print_success "Nginx configured for $domain_name"
+    # Remove default nginx site if it exists
+    if [ -f /etc/nginx/sites-enabled/default ]; then
+        rm /etc/nginx/sites-enabled/default
+    fi
+
+    # Test nginx configuration
+    if nginx -t; then
+        systemctl reload nginx
+        print_success "Nginx configured for $DOMAIN_NAME"
+    else
+        print_error "Nginx configuration test failed"
+        exit 1
+    fi
 
     # SSL Certificate
-    read -p "Do you want to install SSL certificate with Let's Encrypt? (y/n): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        print_status "Installing SSL certificate..."
-        sudo certbot --nginx -d "$domain_name" --non-interactive --agree-tos --email admin@"$domain_name"
-        print_success "SSL certificate installed"
+    print_status "Installing SSL certificate with Let's Encrypt..."
+    if command -v certbot &> /dev/null; then
+        certbot --nginx -d "$DOMAIN_NAME" --non-interactive --agree-tos --email admin@"$DOMAIN_NAME" --redirect
+        if [ $? -eq 0 ]; then
+            print_success "SSL certificate installed and HTTPS redirect enabled"
+        else
+            print_warning "SSL certificate installation failed, but HTTP is working"
+        fi
+    else
+        print_warning "Certbot not found, SSL certificate not installed"
     fi
+else
+    print_status "Skipping Nginx configuration (no domain provided)"
 fi
 
 # Final status check
 print_status "Final system check..."
-service_status=$(sudo systemctl is-active n8n)
+service_status=$(systemctl is-active n8n)
 print_success "n8n service status: $service_status"
+
+# Get server IP for display
+SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || echo "localhost")
 
 # Display access information
 echo ""
@@ -312,11 +334,13 @@ echo -e "${GREEN}🎉 N8N Enterprise Deployment Complete!${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 echo -e "${GREEN}✅ Access Information:${NC}"
-if [ -n "$domain_name" ]; then
-    echo -e "   🌐 Web Interface: https://$domain_name"
+if [ "$USE_DOMAIN" = true ]; then
+    echo -e "   🌐 Web Interface: https://$DOMAIN_NAME"
+    echo -e "   🔒 SSL: Enabled with Let's Encrypt"
 else
-    echo -e "   🌐 Web Interface: http://$(curl -s ifconfig.me):5678"
+    echo -e "   🌐 Web Interface: http://$SERVER_IP:5678"
     echo -e "   🏠 Local Access: http://localhost:5678"
+    echo -e "   ⚠️  Note: Configure domain and SSL for production use"
 fi
 echo ""
 echo -e "${GREEN}✅ Enterprise Features Enabled:${NC}"
@@ -330,13 +354,28 @@ echo -e "   🔄 Restart: sudo systemctl restart n8n"
 echo -e "   📋 Logs: sudo journalctl -u n8n -f"
 echo ""
 echo -e "${GREEN}✅ File Locations:${NC}"
-echo -e "   📁 Installation: $N8N_HOME/n8n"
+echo -e "   📁 Installation: $N8N_INSTALL_DIR"
 echo -e "   💾 Data: $N8N_DATA_DIR"
 echo -e "   📝 Logs: $N8N_LOG_DIR"
 echo -e "   ⚙️  Config: $N8N_DATA_DIR/.env"
+echo -e "   👤 User: $N8N_USER"
+echo -e "   🏠 Home: $N8N_HOME"
+echo ""
+echo -e "${GREEN}✅ User Information:${NC}"
+echo -e "   👤 n8n runs as user: $N8N_USER"
+echo -e "   🔑 To switch to n8n user: sudo su - $N8N_USER"
+echo -e "   📂 User home directory: $N8N_HOME"
 echo ""
 echo -e "${YELLOW}🔐 Security Note:${NC}"
 echo -e "   Please change default passwords and configure authentication"
 echo -e "   Consider setting up a firewall and regular backups"
+echo -e "   The n8n user has sudo privileges for service management"
+echo ""
+echo -e "${BLUE}🔧 Post-Installation Steps:${NC}"
+echo -e "   1. Access n8n web interface and create admin user"
+echo -e "   2. Configure enterprise features (Variables, SAML, LDAP, etc.)"
+echo -e "   3. Set up regular database backups"
+echo -e "   4. Configure firewall rules (ufw enable, ufw allow 80,443)"
+echo -e "   5. Monitor logs: journalctl -u n8n -f"
 echo ""
 print_success "Deployment completed successfully! 🚀"
