@@ -1,8 +1,4 @@
-import {
-	ImportWorkflowFromUrlDto,
-	ManualRunQueryDto,
-	TransferWorkflowBodyDto,
-} from '@n8n/api-types';
+import { ImportWorkflowFromUrlDto, ROLE, TransferWorkflowBodyDto } from '@n8n/api-types';
 import { Logger } from '@n8n/backend-common';
 import { GlobalConfig } from '@n8n/config';
 import type { Project } from '@n8n/db';
@@ -14,6 +10,7 @@ import {
 	TagRepository,
 	SharedWorkflowRepository,
 	WorkflowRepository,
+	AuthenticatedRequest,
 } from '@n8n/db';
 import {
 	Body,
@@ -28,6 +25,7 @@ import {
 	Query,
 	RestController,
 } from '@n8n/decorators';
+import { PROJECT_OWNER_ROLE_SLUG } from '@n8n/permissions';
 // eslint-disable-next-line n8n-local-rules/misplaced-n8n-typeorm-import
 import { In, type FindOptionsRelations } from '@n8n/typeorm';
 import axios from 'axios';
@@ -35,17 +33,25 @@ import express from 'express';
 import { UnexpectedError } from 'n8n-workflow';
 import { v4 as uuid } from 'uuid';
 
+import { WorkflowExecutionService } from './workflow-execution.service';
+import { WorkflowFinderService } from './workflow-finder.service';
+import { WorkflowHistoryService } from './workflow-history/workflow-history.service';
+import { WorkflowRequest } from './workflow.request';
+import { WorkflowService } from './workflow.service';
+import { EnterpriseWorkflowService } from './workflow.service.ee';
+import { CredentialsService } from '../credentials/credentials.service';
+
 import { BadRequestError } from '@/errors/response-errors/bad-request.error';
 import { ForbiddenError } from '@/errors/response-errors/forbidden.error';
 import { InternalServerError } from '@/errors/response-errors/internal-server.error';
 import { NotFoundError } from '@/errors/response-errors/not-found.error';
 import { EventService } from '@/events/event.service';
+import { ExecutionService } from '@/executions/execution.service';
 import { ExternalHooks } from '@/external-hooks';
 import { validateEntity } from '@/generic-helpers';
 import type { IWorkflowResponse } from '@/interfaces';
 import { License } from '@/license';
 import { listQueryMiddleware } from '@/middlewares';
-import { AuthenticatedRequest } from '@/requests';
 import * as ResponseHelper from '@/response-helper';
 import { FolderService } from '@/services/folder.service';
 import { NamingService } from '@/services/naming.service';
@@ -54,14 +60,6 @@ import { TagService } from '@/services/tag.service';
 import { UserManagementMailer } from '@/user-management/email';
 import * as utils from '@/utils';
 import * as WorkflowHelpers from '@/workflow-helpers';
-
-import { WorkflowExecutionService } from './workflow-execution.service';
-import { WorkflowFinderService } from './workflow-finder.service';
-import { WorkflowHistoryService } from './workflow-history.ee/workflow-history.service.ee';
-import { WorkflowRequest } from './workflow.request';
-import { WorkflowService } from './workflow.service';
-import { EnterpriseWorkflowService } from './workflow.service.ee';
-import { CredentialsService } from '../credentials/credentials.service';
 
 @RestController('/workflows')
 export class WorkflowsController {
@@ -87,6 +85,7 @@ export class WorkflowsController {
 		private readonly globalConfig: GlobalConfig,
 		private readonly folderService: FolderService,
 		private readonly workflowFinderService: WorkflowFinderService,
+		private readonly executionService: ExecutionService,
 	) {}
 
 	@Post('/')
@@ -138,8 +137,6 @@ export class WorkflowsController {
 
 		let project: Project | null;
 		const savedWorkflow = await dbManager.transaction(async (transactionManager) => {
-			const workflow = await transactionManager.save<WorkflowEntity>(newWorkflow);
-
 			const { projectId, parentFolderId } = req.body;
 			project =
 				projectId === undefined
@@ -161,6 +158,8 @@ export class WorkflowsController {
 			if (project === null) {
 				throw new UnexpectedError('No personal project found');
 			}
+
+			const workflow = await transactionManager.save<WorkflowEntity>(newWorkflow);
 
 			if (parentFolderId) {
 				try {
@@ -216,6 +215,7 @@ export class WorkflowsController {
 			publicApi: false,
 			projectId: project!.id,
 			projectType: project!.type,
+			uiContext: req.body.uiContext,
 		});
 
 		const scopes = await this.workflowService.getWorkflowScopes(req.user, savedWorkflow.id);
@@ -442,11 +442,7 @@ export class WorkflowsController {
 
 	@Post('/:workflowId/run')
 	@ProjectScope('workflow:execute')
-	async runManually(
-		req: WorkflowRequest.ManualRun,
-		_res: unknown,
-		@Query query: ManualRunQueryDto,
-	) {
+	async runManually(req: WorkflowRequest.ManualRun, _res: unknown) {
 		if (!req.body.workflowData.id) {
 			throw new UnexpectedError('You cannot execute a workflow without an ID');
 		}
@@ -470,7 +466,6 @@ export class WorkflowsController {
 			req.body,
 			req.user,
 			req.headers['push-ref'],
-			query.partialExecutionVersion,
 		);
 	}
 
@@ -532,7 +527,7 @@ export class WorkflowsController {
 
 		const projectsRelations = await this.projectRelationRepository.findBy({
 			projectId: In(newShareeIds),
-			role: 'project:personalOwner',
+			role: { slug: PROJECT_OWNER_ROLE_SLUG },
 		});
 
 		await this.mailer.notifyWorkflowShared({
@@ -557,5 +552,48 @@ export class WorkflowsController {
 			body.shareCredentials,
 			body.destinationParentFolderId,
 		);
+	}
+
+	@Get('/:workflowId/executions/last-successful')
+	@ProjectScope('workflow:read')
+	async getLastSuccessfulExecution(
+		_req: AuthenticatedRequest,
+		_res: unknown,
+		@Param('workflowId') workflowId: string,
+	) {
+		const lastExecution = await this.executionService.getLastSuccessfulExecution(workflowId);
+
+		if (lastExecution === undefined) {
+			throw new NotFoundError('No successful execution found for the workflow');
+		}
+
+		return lastExecution;
+	}
+
+	@Post('/with-node-types')
+	async getWorkflowsWithNodesIncluded(req: AuthenticatedRequest, res: express.Response) {
+		try {
+			const hasPermission = req.user.role.slug === ROLE.Owner || req.user.role.slug === ROLE.Admin;
+
+			if (!hasPermission) {
+				res.json({ data: [], count: 0 });
+				return;
+			}
+
+			const { nodeTypes } = req.body as { nodeTypes: string[] };
+			const workflows = await this.workflowService.getWorkflowsWithNodesIncluded(
+				req.user,
+				nodeTypes,
+			);
+
+			res.json({
+				data: workflows,
+				count: workflows.length,
+			});
+		} catch (maybeError) {
+			const error = utils.toError(maybeError);
+			ResponseHelper.reportError(error);
+			ResponseHelper.sendErrorResponse(res, error);
+		}
 	}
 }

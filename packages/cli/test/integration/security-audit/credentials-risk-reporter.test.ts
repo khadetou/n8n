@@ -1,9 +1,12 @@
+import { testDb } from '@n8n/backend-test-utils';
 import type { SecurityConfig } from '@n8n/config';
-import { generateNanoId } from '@n8n/db';
-import { CredentialsRepository } from '@n8n/db';
-import { ExecutionDataRepository } from '@n8n/db';
-import { ExecutionRepository } from '@n8n/db';
-import { WorkflowRepository } from '@n8n/db';
+import {
+	generateNanoId,
+	CredentialsRepository,
+	ExecutionDataRepository,
+	ExecutionRepository,
+	WorkflowRepository,
+} from '@n8n/db';
 import { Container } from '@n8n/di';
 import { mock } from 'jest-mock-extended';
 import { v4 as uuid } from 'uuid';
@@ -12,7 +15,6 @@ import { CREDENTIALS_REPORT } from '@/security-audit/constants';
 import { SecurityAuditService } from '@/security-audit/security-audit.service';
 
 import { getRiskSection } from './utils';
-import * as testDb from '../shared/test-db';
 
 let securityAuditService: SecurityAuditService;
 
@@ -49,6 +51,7 @@ test('should report credentials not in any use', async () => {
 		active: false,
 		connections: {},
 		nodeTypes: {},
+		versionId: uuid(),
 		nodes: [
 			{
 				id: uuid(),
@@ -96,6 +99,7 @@ test('should report credentials not in active use', async () => {
 		active: false,
 		connections: {},
 		nodeTypes: {},
+		versionId: uuid(),
 		nodes: [
 			{
 				id: uuid(),
@@ -140,6 +144,7 @@ test('should report credential in not recently executed workflow', async () => {
 		active: false,
 		connections: {},
 		nodeTypes: {},
+		versionId: uuid(),
 		nodes: [
 			{
 				id: uuid(),
@@ -209,6 +214,7 @@ test('should not report credentials in recently executed workflow', async () => 
 		active: true,
 		connections: {},
 		nodeTypes: {},
+		versionId: uuid(),
 		nodes: [
 			{
 				id: uuid(),

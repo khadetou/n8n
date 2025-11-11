@@ -1,7 +1,15 @@
+export * from './api';
+export * from './browser';
+export * from './community-nodes';
+export * from './instance';
+export * from './execution';
+
 export const LICENSE_FEATURES = {
 	SHARING: 'feat:sharing',
 	LDAP: 'feat:ldap',
 	SAML: 'feat:saml',
+	OIDC: 'feat:oidc',
+	MFA_ENFORCEMENT: 'feat:mfaEnforcement',
 	LOG_STREAMING: 'feat:logStreaming',
 	ADVANCED_EXECUTION_FILTERS: 'feat:advancedExecutionFilters',
 	VARIABLES: 'feat:variables',
@@ -9,7 +17,6 @@ export const LICENSE_FEATURES = {
 	API_DISABLED: 'feat:apiDisabled',
 	EXTERNAL_SECRETS: 'feat:externalSecrets',
 	SHOW_NON_PROD_BANNER: 'feat:showNonProdBanner',
-	WORKFLOW_HISTORY: 'feat:workflowHistory',
 	DEBUG_IN_EDITOR: 'feat:debugInEditor',
 	BINARY_DATA_S3: 'feat:binaryDataS3',
 	MULTIPLE_MAIN_INSTANCES: 'feat:multipleMainInstances',
@@ -27,6 +34,9 @@ export const LICENSE_FEATURES = {
 	INSIGHTS_VIEW_DASHBOARD: 'feat:insights:viewDashboard',
 	INSIGHTS_VIEW_HOURLY_DATA: 'feat:insights:viewHourlyData',
 	API_KEY_SCOPES: 'feat:apiKeyScopes',
+	WORKFLOW_DIFFS: 'feat:workflowDiffs',
+	CUSTOM_ROLES: 'feat:customRoles',
+	AI_BUILDER: 'feat:aiBuilder',
 } as const;
 
 export const LICENSE_QUOTAS = {
@@ -43,6 +53,7 @@ export const LICENSE_QUOTAS = {
 } as const;
 
 export const UNLIMITED_LICENSE_QUOTA = -1;
+export const DEFAULT_WORKFLOW_HISTORY_PRUNE_LIMIT = 24;
 
 export type BooleanLicenseFeature = (typeof LICENSE_FEATURES)[keyof typeof LICENSE_FEATURES];
 export type NumericLicenseFeature = (typeof LICENSE_QUOTAS)[keyof typeof LICENSE_QUOTAS];
@@ -95,8 +106,8 @@ export const LDAP_DEFAULT_CONFIGURATION: LdapConfig = {
 	searchTimeout: 60,
 };
 
-export const INSTANCE_TYPES = ['main', 'webhook', 'worker'] as const;
-export type InstanceType = (typeof INSTANCE_TYPES)[number];
+export { Time } from './time';
 
-export const INSTANCE_ROLES = ['unset', 'leader', 'follower'] as const;
-export type InstanceRole = (typeof INSTANCE_ROLES)[number];
+export const MIN_PASSWORD_CHAR_LENGTH = 8;
+
+export const MAX_PASSWORD_CHAR_LENGTH = 64;

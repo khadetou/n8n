@@ -46,6 +46,8 @@ const ITEM_TO_DATA_ACCESSORS = [
 	/^item/,
 ];
 
+const SPLIT_OUT_NODE_TYPE = 'n8n-nodes-base.splitOut';
+
 // These we safely can convert to a normal argument
 const ITEM_ACCESSORS = ['params', 'isExecuted'];
 
@@ -207,7 +209,7 @@ function parseExpressionMapping(
 			return {
 				nodeNameInExpression,
 				originalExpression: `${exprStart}.${parts[0]}`, // $('abc').first()
-				replacementPrefix: `$('${startNodeName}').${accessorPrefix}`, //  $('Start').first()
+				replacementPrefix: `$('${startNodeName}').${accessorPrefix}.json`, //  $('Start').first().json
 				replacementName: `${nodeNamePlainJs}_${convertDataAccessorName(originalName)}`, // nodeName_firstItem, nodeName_itemMatching_20
 			};
 		} else {
@@ -266,7 +268,9 @@ function extractExpressionCandidate(expression: string, startIndex: number, endI
 
 	// Note that by choosing match 0 we use `itemMatching` matches over `item`
 	// matches by relying on the order in ITEM_TO_DATA_ACCESSORS
-	const after_accessor_idx = endIndex + (firstPartException[0]?.[0].length ?? -1) + 1;
+	let after_accessor_idx = endIndex + (firstPartException[0]?.[0].length ?? -1);
+	// skip `.` to continue, but halt before other symbols like `[` in `all()[0]`
+	if (expression[after_accessor_idx + 1] === '.') after_accessor_idx += 1;
 	const after_accessor = expression.slice(after_accessor_idx);
 	const firstInvalidCharMatch = INVALID_JS_DOT_PATH.exec(after_accessor);
 
@@ -296,6 +300,7 @@ function parseCandidateMatch(
 
 	const candidate = extractExpressionCandidate(expression, startIndex, endIndex);
 	if (candidate === null) return null;
+
 	return parseExpressionMapping(
 		candidate,
 		nodeNameInExpression,
@@ -489,6 +494,7 @@ export function extractReferencesInNodeExpressions(
 	insertedStartName: string,
 	graphInputNodeNames?: string[],
 ) {
+	const [start] = graphInputNodeNames ?? [];
 	////
 	// STEP 1 - Validate input invariants
 	////
@@ -529,6 +535,8 @@ export function extractReferencesInNodeExpressions(
 	const parameterTreeMappingByNode = new Map<string, ParameterExtractMapping>();
 	// This is used to track all candidates for change, necessary for deduplication
 	const allData = [];
+	// Additional mappings that should contribute to sub-workflow inputs (e.g. Split Out 'fieldToSplitOut')
+	const extraVariableCandidates: ExpressionMapping[] = [];
 
 	for (const node of subGraph) {
 		const [parameterMapping, allMappings] = applyParameterMapping(node.parameters, (s) =>
@@ -542,6 +550,40 @@ export function extractReferencesInNodeExpressions(
 		);
 		parameterTreeMappingByNode.set(node.name, parameterMapping);
 		allData.push(...allMappings);
+
+		if (node.name === start && node.type === SPLIT_OUT_NODE_TYPE) {
+			const raw = node.parameters?.fieldToSplitOut;
+			if (typeof raw === 'string' && raw.trim() !== '') {
+				const trimmed = raw.trim();
+				const isExpression = trimmed.startsWith('=');
+
+				// Expressions in Split Out 'fieldToSplitOut' parameters are not supported,
+				// as they define the fields to split out only at execution time.
+				if (isExpression) {
+					throw new OperationalError(
+						`Extracting sub-workflow from Split Out node with 'fieldToSplitOut' parameter having expression "${trimmed}" is not supported.`,
+					);
+				}
+
+				// Parameter value is a CSV of fields to split out.
+				// Create synthetic $json expressions for each field
+				const fields = isExpression
+					? [trimmed]
+					: trimmed.split(',').map((field) => `={{$json.${field.trim()}}}`);
+
+				for (const expression of fields) {
+					const mappingsFromField = parseReferencingExpressions(
+						expression,
+						nodeRegexps,
+						nodeNames,
+						insertedStartName,
+						graphInputNodeNames?.includes(node.name) ?? false,
+					);
+
+					extraVariableCandidates.push(...mappingsFromField);
+				}
+			}
+		}
 	}
 
 	////
@@ -549,7 +591,7 @@ export function extractReferencesInNodeExpressions(
 	////
 
 	const subGraphNodeNames = new Set(subGraphNames);
-	const dataFromOutsideSubgraph = allData.filter(
+	const dataFromOutsideSubgraph = [...allData, ...extraVariableCandidates].filter(
 		// `nodeNameInExpression` being absent implies direct access via `$json` or `$binary`
 		(x) => !x.nodeNameInExpression || !subGraphNodeNames.has(x.nodeNameInExpression),
 	);
@@ -583,6 +625,17 @@ export function extractReferencesInNodeExpressions(
 		);
 		allUsedMappings.push(...usedMappings);
 		output.push(result);
+	}
+
+	for (const candidate of extraVariableCandidates) {
+		const key = originalExpressionMap.get(candidate.originalExpression);
+		if (!key) continue;
+		const canonical = triggerArgumentMap.get(key);
+		if (!canonical) continue;
+
+		if (!allUsedMappings.some((u) => u.replacementName === canonical.replacementName)) {
+			allUsedMappings.push(canonical);
+		}
 	}
 
 	const variables = new Map(allUsedMappings.map((m) => [m.replacementName, m.originalExpression]));

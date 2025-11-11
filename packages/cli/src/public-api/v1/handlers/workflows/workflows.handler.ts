@@ -14,7 +14,7 @@ import { EventService } from '@/events/event.service';
 import { ExternalHooks } from '@/external-hooks';
 import { addNodeIds, replaceInvalidCredentials } from '@/workflow-helpers';
 import { WorkflowFinderService } from '@/workflows/workflow-finder.service';
-import { WorkflowHistoryService } from '@/workflows/workflow-history.ee/workflow-history.service.ee';
+import { WorkflowHistoryService } from '@/workflows/workflow-history/workflow-history.service';
 import { WorkflowService } from '@/workflows/workflow.service';
 import { EnterpriseWorkflowService } from '@/workflows/workflow.service.ee';
 
@@ -157,7 +157,7 @@ export = {
 				...(name !== undefined && { name: Like('%' + name.trim() + '%') }),
 			};
 
-			if (['global:owner', 'global:admin'].includes(req.user.role)) {
+			if (['global:owner', 'global:admin'].includes(req.user.role.slug)) {
 				if (tags) {
 					const workflowIds = await Container.get(TagRepository).getWorkflowIdsViaTags(
 						parseTagNames(tags),
@@ -211,11 +211,37 @@ export = {
 				where.id = In(workflowsIds);
 			}
 
+			const selectFields: (keyof WorkflowEntity)[] = [
+				'id',
+				'name',
+				'active',
+				'createdAt',
+				'updatedAt',
+				'isArchived',
+				'nodes',
+				'connections',
+				'settings',
+				'staticData',
+				'meta',
+				'versionId',
+				'triggerCount',
+				'shared',
+			];
+
+			if (!excludePinnedData) {
+				selectFields.push('pinData');
+			}
+
+			const relations = ['shared'];
+			if (!Container.get(GlobalConfig).tags.disabled) {
+				relations.push('tags');
+			}
 			const [workflows, count] = await Container.get(WorkflowRepository).findAndCount({
 				skip: offset,
 				take: limit,
+				select: selectFields,
+				relations,
 				where,
-				...(!Container.get(GlobalConfig).tags.disabled && { relations: ['tags'] }),
 			});
 
 			if (excludePinnedData) {
@@ -273,7 +299,7 @@ export = {
 			}
 
 			try {
-				await updateWorkflow(workflow.id, updateData);
+				await updateWorkflow(workflow, updateData);
 			} catch (error) {
 				if (error instanceof Error) {
 					return res.status(400).json({ message: error.message });
@@ -342,6 +368,13 @@ export = {
 
 				workflow.active = true;
 
+				Container.get(EventService).emit('workflow-activated', {
+					user: req.user,
+					workflowId: workflow.id,
+					workflow,
+					publicApi: true,
+				});
+
 				return res.json(workflow);
 			}
 
@@ -375,6 +408,13 @@ export = {
 				await setWorkflowAsInactive(workflow.id);
 
 				workflow.active = false;
+
+				Container.get(EventService).emit('workflow-deactivated', {
+					user: req.user,
+					workflowId: workflow.id,
+					workflow,
+					publicApi: true,
+				});
 
 				return res.json(workflow);
 			}

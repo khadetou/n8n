@@ -13,13 +13,21 @@ import type {
 import { PROJECT_ROOT } from 'n8n-workflow';
 
 import { FolderRepository } from './folder.repository';
-import { WebhookEntity, TagEntity, WorkflowEntity, WorkflowTagMapping } from '../entities';
+import {
+	WebhookEntity,
+	TagEntity,
+	WorkflowEntity,
+	WorkflowTagMapping,
+	WorkflowDependency,
+} from '../entities';
 import type {
 	ListQueryDb,
 	FolderWithWorkflowAndSubFolderCount,
 	ListQuery,
 } from '../entities/types-db';
+import { buildWorkflowsByNodesQuery } from '../utils/build-workflows-by-nodes-query';
 import { isStringArray } from '../utils/is-string-array';
+import { TimedQuery } from '../utils/timed-query';
 
 type ResourceType = 'folder' | 'workflow';
 
@@ -139,27 +147,56 @@ export class WorkflowRepository extends Repository<WorkflowEntity> {
 	}
 
 	private buildBaseUnionQuery(workflowIds: string[], options: ListQuery.Options = {}) {
-		const subQueryParameters: ListQuery.Options = {
+		// Common fields for both folders and workflows
+		const commonFields = {
+			createdAt: true,
+			updatedAt: true,
+			id: true,
+			name: true,
+		} as const;
+
+		// Transform `query` => `name` for folder repository
+		const folderFilter = options.filter ? { ...options.filter } : undefined;
+		if (folderFilter?.query) {
+			folderFilter.name = folderFilter.query;
+		}
+
+		const folderQueryParameters: ListQuery.Options = {
+			select: commonFields,
+			filter: folderFilter,
+		};
+
+		const workflowQueryParameters: ListQuery.Options = {
 			select: {
-				createdAt: true,
+				...commonFields,
+				description: true,
+				// For some reason the order of updatedAt and createdAt here is load-bearing
+				// and the generated sql queries below risk switching up the order otherwise
+				// depending on whether this code is called for a project or the overview
+				// A proper fix would sort the columnNames here and in the folder and workflow queries
+				// but that risks breaking other use cases
+				// https://linear.app/n8n/issue/ADO-4376/tech-debt-investigate-and-fix-root-cause-of-incorrect-sql-column
 				updatedAt: true,
+				createdAt: true,
 				id: true,
 				name: true,
 			},
 			filter: options.filter,
 		};
 
-		const columnNames = [...Object.keys(subQueryParameters.select ?? {}), 'resource'];
+		// For union, we need to have the same columns, so add NULL as description for folders
+		const columnNames = [...Object.keys(workflowQueryParameters.select ?? {}), 'resource'];
 
 		const [sortByColumn, sortByDirection] = this.parseSortingParams(
 			options.sortBy ?? 'updatedAt:asc',
 		);
 
 		const foldersQuery = this.folderRepository
-			.getManyQuery(subQueryParameters)
+			.getManyQuery(folderQueryParameters)
+			.addSelect('NULL', 'description') // Add NULL for description in folders
 			.addSelect("'folder'", 'resource');
 
-		const workflowsQuery = this.getManyQuery(workflowIds, subQueryParameters).addSelect(
+		const workflowsQuery = this.getManyQuery(workflowIds, workflowQueryParameters).addSelect(
 			"'workflow'",
 			'resource',
 		);
@@ -282,7 +319,7 @@ export class WorkflowRepository extends Repository<WorkflowEntity> {
 			typeof options.filter?.parentFolderId === 'string' &&
 			options.filter.parentFolderId !== PROJECT_ROOT &&
 			typeof options.filter?.projectId === 'string' &&
-			options.filter.name
+			options.filter.query
 		) {
 			const folderIds = await this.folderRepository.getAllFolderIdsInHierarchy(
 				options.filter.parentFolderId,
@@ -371,6 +408,7 @@ export class WorkflowRepository extends Repository<WorkflowEntity> {
 		});
 	}
 
+	@TimedQuery()
 	async getMany(workflowIds: string[], options: ListQuery.Options = {}) {
 		if (workflowIds.length === 0) {
 			return [];
@@ -432,16 +470,45 @@ export class WorkflowRepository extends Repository<WorkflowEntity> {
 		this.applyTagsFilter(qb, filter);
 		this.applyProjectFilter(qb, filter);
 		this.applyParentFolderFilter(qb, filter);
+		this.applyNodeTypesFilter(qb, filter);
+		this.applyAvailableInMCPFilter(qb, filter);
+	}
+
+	private applyAvailableInMCPFilter(
+		qb: SelectQueryBuilder<WorkflowEntity>,
+		filter: ListQuery.Options['filter'],
+	): void {
+		if (typeof filter?.availableInMCP === 'boolean') {
+			const dbType = this.globalConfig.database.type;
+
+			if (['postgresdb'].includes(dbType)) {
+				qb.andWhere("workflow.settings ->> 'availableInMCP' = :availableInMCP", {
+					availableInMCP: filter.availableInMCP.toString(),
+				});
+			} else if (['mysqldb', 'mariadb'].includes(dbType)) {
+				qb.andWhere("JSON_EXTRACT(workflow.settings, '$.availableInMCP') = :availableInMCP", {
+					availableInMCP: filter.availableInMCP,
+				});
+			} else if (dbType === 'sqlite') {
+				qb.andWhere("JSON_EXTRACT(workflow.settings, '$.availableInMCP') = :availableInMCP", {
+					availableInMCP: filter.availableInMCP ? 1 : 0, // SQLite stores booleans as 0/1
+				});
+			}
+		}
 	}
 
 	private applyNameFilter(
 		qb: SelectQueryBuilder<WorkflowEntity>,
 		filter: ListQuery.Options['filter'],
 	): void {
-		if (typeof filter?.name === 'string' && filter.name !== '') {
-			qb.andWhere('LOWER(workflow.name) LIKE :name', {
-				name: `%${filter.name.toLowerCase()}%`,
-			});
+		const searchValue = filter?.query;
+
+		if (typeof searchValue === 'string' && searchValue !== '') {
+			const searchTerm = `%${searchValue.toLowerCase()}%`;
+			qb.andWhere(
+				"(LOWER(workflow.name) LIKE :searchTerm OR LOWER(COALESCE(workflow.description, '')) LIKE :searchTerm)",
+				{ searchTerm },
+			);
 		}
 	}
 
@@ -516,6 +583,22 @@ export class WorkflowRepository extends Repository<WorkflowEntity> {
 		}
 	}
 
+	private applyNodeTypesFilter(
+		qb: SelectQueryBuilder<WorkflowEntity>,
+		filter: ListQuery.Options['filter'],
+	): void {
+		const nodeTypes = isStringArray(filter?.nodeTypes) ? filter.nodeTypes : [];
+
+		if (!nodeTypes.length) return;
+
+		const { whereClause, parameters } = buildWorkflowsByNodesQuery(
+			nodeTypes,
+			this.globalConfig.database.type,
+		);
+
+		qb.andWhere(whereClause, parameters);
+	}
+
 	private applyOwnedByRelation(qb: SelectQueryBuilder<WorkflowEntity>): void {
 		// Check if 'shared' join already exists from project filter
 		if (!qb.expressionMap.aliases.find((alias) => alias.name === 'shared')) {
@@ -556,6 +639,8 @@ export class WorkflowRepository extends Repository<WorkflowEntity> {
 				'workflow.createdAt',
 				'workflow.updatedAt',
 				'workflow.versionId',
+				'workflow.settings',
+				'workflow.description',
 			]);
 			return;
 		}
@@ -709,5 +794,70 @@ export class WorkflowRepository extends Repository<WorkflowEntity> {
 			{ id: In(workflowIds) },
 			{ parentFolder: toFolderId === PROJECT_ROOT ? null : { id: toFolderId } },
 		);
+	}
+
+	async findWorkflowsWithNodeType(nodeTypes: string[], includeNodes: boolean = false) {
+		if (!nodeTypes?.length) return [];
+
+		const qb = this.createQueryBuilder('workflow');
+
+		const { whereClause, parameters } = buildWorkflowsByNodesQuery(
+			nodeTypes,
+			this.globalConfig.database.type,
+		);
+
+		const workflows: Array<
+			Pick<WorkflowEntity, 'id' | 'name' | 'active'> & Partial<Pick<WorkflowEntity, 'nodes'>>
+		> = await qb
+			.select([
+				'workflow.id',
+				'workflow.name',
+				'workflow.active',
+				...(includeNodes ? ['workflow.nodes'] : []),
+			])
+			.where(whereClause, parameters)
+			.getMany();
+
+		return workflows;
+	}
+
+	/**
+	 * Find workflows that need indexing - either unindexed (no entries in workflow_dependency)
+	 * or outdated (versionCounter > workflowVersionId in workflow_dependency).
+	 *
+	 * NOTE: we use a simple batch limit instead of proper pagination because we use this
+	 * method to retrieve workflows and then index them immediately - so they won't be returned
+	 * again in the next call anyway.
+	 *
+	 */
+	async findWorkflowsNeedingIndexing(batchSize?: number): Promise<WorkflowEntity[]> {
+		const qb = this.createQueryBuilder('workflow');
+		const workflowIdAlias = 'workflowId';
+		const maxVersionIdAlias = 'maxVersionId';
+		const depAlias = 'dep';
+
+		qb.leftJoin(
+			(subQuery) => {
+				return subQuery
+					.select('wd.workflowId', workflowIdAlias)
+					.addSelect('MAX(wd.workflowVersionId)', maxVersionIdAlias)
+					.from(WorkflowDependency, 'wd')
+					.groupBy('wd.workflowId');
+			},
+			depAlias,
+			`workflow.id = ${qb.escape(depAlias)}.${qb.escape(workflowIdAlias)}`,
+		);
+
+		// Include workflows that are either:
+		// 1. Unindexed (no dependency entries exist)
+		// 2. Outdated (workflow version is newer than indexed version)
+		qb.where(`${qb.escape(depAlias)}.${qb.escape(workflowIdAlias)} IS NULL`).orWhere(
+			`workflow.versionCounter > ${qb.escape(depAlias)}.${qb.escape(maxVersionIdAlias)}`,
+		);
+		if (batchSize) {
+			qb.limit(batchSize);
+		}
+
+		return await qb.getMany();
 	}
 }

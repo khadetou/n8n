@@ -1,6 +1,6 @@
+import { testDb } from '@n8n/backend-test-utils';
 import { GlobalConfig } from '@n8n/config';
-import { generateNanoId } from '@n8n/db';
-import { WorkflowRepository } from '@n8n/db';
+import { generateNanoId, WorkflowRepository } from '@n8n/db';
 import { Container } from '@n8n/di';
 import { mock } from 'jest-mock-extended';
 import { NodeConnectionTypes } from 'n8n-workflow';
@@ -17,7 +17,6 @@ import {
 	simulateOutdatedInstanceOnce,
 	simulateUpToDateInstance,
 } from './utils';
-import * as testDb from '../shared/test-db';
 
 let securityAuditService: SecurityAuditService;
 
@@ -46,6 +45,7 @@ test('should report webhook lacking authentication', async () => {
 		active: true,
 		nodeTypes: {},
 		connections: {},
+		versionId: uuid(),
 		nodes: [
 			{
 				parameters: {
@@ -89,6 +89,7 @@ test('should not report webhooks having basic or header auth', async () => {
 			active: true,
 			nodeTypes: {},
 			connections: {},
+			versionId: uuid(),
 			nodes: [
 				{
 					parameters: {
@@ -133,6 +134,7 @@ test('should not report webhooks validated by direct children', async () => {
 			name: 'My Test Workflow',
 			active: true,
 			nodeTypes: {},
+			versionId: uuid(),
 			nodes: [
 				{
 					parameters: {

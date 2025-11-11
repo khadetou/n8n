@@ -1,3 +1,4 @@
+import { createWorkflow, newWorkflow } from '@n8n/backend-test-utils';
 import { GlobalConfig } from '@n8n/config';
 import { WorkflowRepository } from '@n8n/db';
 import { Container } from '@n8n/di';
@@ -5,12 +6,10 @@ import { DateTime } from 'luxon';
 import { parse as semverParse } from 'semver';
 import request, { type Response } from 'supertest';
 
-import config from '@/config';
 import { N8N_VERSION } from '@/constants';
 import { EventService } from '@/events/event.service';
 import { PrometheusMetricsService } from '@/metrics/prometheus-metrics.service';
 import { CacheService } from '@/services/cache/cache.service';
-import { createWorkflow, newWorkflow } from '@test-integration/db/workflows';
 
 import { setupTestServer } from './shared/utils';
 
@@ -31,6 +30,7 @@ globalConfig.endpoints.metrics = {
 	includeCredentialTypeLabel: false,
 	includeNodeTypeLabel: false,
 	includeWorkflowIdLabel: false,
+	includeWorkflowNameLabel: false,
 	includeApiPathLabel: true,
 	includeApiMethodLabel: true,
 	includeApiStatusCodeLabel: true,
@@ -296,7 +296,7 @@ describe('PrometheusMetricsService', () => {
 		 * Arrange
 		 */
 		prometheusService.enableMetric('queue');
-		config.set('executions.mode', 'queue');
+		globalConfig.executions.mode = 'queue';
 		await prometheusService.init(server.app);
 
 		/**
@@ -323,7 +323,7 @@ describe('PrometheusMetricsService', () => {
 		 * Arrange
 		 */
 		prometheusService.enableMetric('queue');
-		config.set('executions.mode', 'queue');
+		globalConfig.executions.mode = 'queue';
 		await prometheusService.init(server.app);
 
 		/**
